@@ -1,4 +1,5 @@
 yt-dlp
+curl_cffi       # browser impersonation — REQUIRED to get past TikTok's anti-bot
 ffmpeg-python
 mutagen
 fastapi

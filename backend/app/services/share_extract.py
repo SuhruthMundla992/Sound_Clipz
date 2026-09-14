@@ -15,11 +15,54 @@ Typical things this file will need to handle:
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit, urlunsplit
 
-def clean_share_url(raw_url: str) -> str:
+
+def get_tiktok_url(raw_url: str) -> str:
     """
     Take a raw shared link and return a clean TikTok URL.
 
-    TODO (you direct this): decide what "clean" means and implement it.
+    This is the main entry point for the share_extract module.
     """
-    raise NotImplementedError
+
+
+def clean_share_url(raw_url: str) -> str:
+    """
+    Strip the tracking junk off a TikTok link.
+
+    Keeps the meaningful parts of the URL (scheme, host, path) and drops the
+    query string (?_r=1&_t=...) and any #fragment. We never look for specific
+    params to remove -- we keep what we want and discard the rest.
+
+    Example:
+        https://www.tiktok.com/@user/video/7412...?_r=1&_t=ZP-99...
+        -> https://www.tiktok.com/@user/video/7412...
+    """
+    parts = urlsplit(raw_url)
+
+
+
+    # urlunsplit takes a 5-tuple: (scheme, netloc, path, query, fragment).
+    # Blank out query + fragment; keep the rest.
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+
+
+def main():
+    """
+    Run some quick tests on the share_extract module.
+    """
+    test_urls = [
+        "https://www.tiktok.com/t/ZP83af6pe/",
+        "https://www.tiktok.com/@user/video/7412...?_r=1&_t=ZP-99...",
+        "https://vm.tiktok.com/XXXX/",
+        "https://www.tiktok.com/@user/video/7412...#fragment",
+        "https://www.tiktok.com/@user/video/7412...?_r=1&_t=ZP-99...#fragment",
+    ]
+
+    for url in test_urls:
+        clean_url = clean_share_url(url)
+        print(f"Raw: {url}\nClean: {clean_url}\n")
+
+
+if __name__ == "__main__":
+    main()

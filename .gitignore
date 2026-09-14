@@ -23,3 +23,6 @@ backend/covers/
 .vscode/
 .idea/
 .DS_Store
+
+# Downloaded binaries (ffmpeg/ffprobe) — too big + platform-specific to commit
+backend/bin/
