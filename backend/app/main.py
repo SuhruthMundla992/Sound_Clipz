@@ -28,9 +28,9 @@ def health():
 # Regular `def` (not async) because process_share is blocking.
 @app.post("/clip")
 def create_clip(request: ClipRequest):
-    # TODO (you write this):
-    #   1. call process_share(request.url) and keep the result
-    #      -> but get_tiktok_url can raise ValueError for a bad link,
-    #         so wrap it in try/except and turn that into an HTTPException(400).
-    #   2. return the result
-    raise NotImplementedError  # remove once you return something
+    try:
+        result = process_share(request.url)
+    except ValueError as e:
+        # Bad/invalid link -> return a clean HTTP 400 instead of a 500 crash.
+        raise HTTPException(status_code=400, detail=str(e))
+    return result
