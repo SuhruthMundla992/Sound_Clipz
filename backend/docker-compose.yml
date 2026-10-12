@@ -1,0 +1,17 @@
+# Describes the containers to run. `docker compose up -d` starts them.
+services:
+  db:
+    image: postgres:16            # blueprint: official Postgres 16
+    container_name: soundclipz-db # a friendly name for the running container
+    env_file:
+      - .env                      # load POSTGRES_USER/PASSWORD/DB from .env
+    ports:
+      # map host port -> container port, so our app reaches it at localhost:5432
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      # persist the database files in a named volume so data survives restarts
+      - soundclipz_pgdata:/var/lib/postgresql/data
+
+# declare the named volume used above
+volumes:
+  soundclipz_pgdata:
