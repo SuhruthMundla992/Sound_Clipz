@@ -34,3 +34,30 @@ class Clip(SQLModel, table=True):
 
     # When this row was created. default_factory runs the function at insert time.
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class Playlist(SQLModel, table=True):
+    """A named collection of clips. Which clips it holds lives in PlaylistClip."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    # Stored totals so reading a playlist is fast. These must be updated
+    # whenever a clip is added to or removed from the playlist.
+    clip_count: int = 0
+    total_duration: int = 0  # seconds, sum of every clip's duration
+
+
+class PlaylistClip(SQLModel, table=True):
+    """Link table: one row per (playlist, clip) pair.
+
+    This is what lets a playlist hold many clips and a clip appear in many
+    playlists (a many-to-many relationship).
+    """
+
+    # Both columns together form the primary key, so the same clip can't be
+    # added to the same playlist twice.
+    playlist_id: int = Field(foreign_key="playlist.id", primary_key=True)
+    clip_id: int = Field(foreign_key="clip.id", primary_key=True)
+    added_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
