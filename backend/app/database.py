@@ -23,6 +23,11 @@ def create_db_and_tables() -> None:
     
 
 
-def get_session() -> Session:
-    """Open a new database session (one conversation with the DB)."""
-    return Session(engine)
+def get_session():
+    """Open a database session for one request, and close it when the request ends.
+
+    Used with FastAPI's Depends(): everything before `yield` runs before the
+    route, and the `with` block closes the session after the route finishes.
+    """
+    with Session(engine) as session:
+        yield session

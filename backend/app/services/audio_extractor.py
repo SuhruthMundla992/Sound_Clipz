@@ -1,26 +1,20 @@
 from __future__ import annotations
+
 import yt_dlp
-import pathlib
-import os
+
+from app.config import BACKEND_ROOT, MEDIA_ROOT
+
+OUTPUT_DIR = MEDIA_ROOT / "original"   # where saved audio goes
+BIN_DIR = BACKEND_ROOT / "bin"         # where ffmpeg + ffprobe live
 
 
-# Anchor everything to backend/ so it works no matter where we run from.
-BACKEND_ROOT = pathlib.Path(__file__).resolve().parents[2]
-OUTPUT_DIR = BACKEND_ROOT / "media" / "original"   # where saved audio goes
-BIN_DIR = BACKEND_ROOT / "bin"                       # where ffmpeg + ffprobe live
+class TikTokUnavailable(Exception):
+    """yt-dlp couldn't get this TikTok: deleted, private, region-locked, or blocked."""
 
 
-def extract_audio(url: str):
-
-
-
-
-
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    #create the output if alrady not created
-
-
-    options = {
+def _ydl_options() -> dict:
+    """yt-dlp settings, built fresh each time so no two downloads share one dict."""
+    return {
         # grab the best audio-only stream (fall back to best overall)
         "format": "bestaudio/best",
         "outtmpl": str(OUTPUT_DIR / "%(id)s.%(ext)s"),
@@ -31,12 +25,33 @@ def extract_audio(url: str):
     }
 
 
-    with yt_dlp.YoutubeDL(options) as ydl:
-        info = ydl.extract_info(url, download=True)
+def fetch_info(url: str) -> dict:
+    """Look up a TikTok's metadata, including its video id, WITHOUT downloading.
 
-    vid_id = info.get("id")
-    saved_file_path = OUTPUT_DIR / f"{vid_id}.{info.get('ext')}"
+    This lets the caller check the database for the video id first and skip
+    the download entirely if the clip is already saved.
+    """
+    try:
+        with yt_dlp.YoutubeDL(_ydl_options()) as ydl:
+            return ydl.extract_info(url, download=False)
+    except yt_dlp.utils.DownloadError as e:
+        raise TikTokUnavailable(str(e)) from e
 
+
+def download_audio(info: dict) -> dict:
+    """Download the audio described by `info` (the result of fetch_info).
+
+    Reuses the info yt-dlp already fetched, so TikTok isn't looked up twice.
+    """
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)   # create the folder if it's missing
+
+    try:
+        with yt_dlp.YoutubeDL(_ydl_options()) as ydl:
+            info = ydl.process_ie_result(info, download=True)
+    except yt_dlp.utils.DownloadError as e:
+        raise TikTokUnavailable(str(e)) from e
+
+    saved_file_path = OUTPUT_DIR / f"{info['id']}.{info['ext']}"
 
     metadata = {
         "title": info.get("title", "Unknown Title"),
@@ -45,12 +60,19 @@ def extract_audio(url: str):
         "thumbnail": info.get("thumbnail", ""),
     }
 
-
+    # Return the path RELATIVE to MEDIA_ROOT ("original/<id>.mp3"), not the
+    # full path on this machine, so it stays valid if the backend moves.
+    # as_posix() uses forward slashes on every OS.
     return {
-        "file_path": str(saved_file_path),
+        "video_id": info["id"],
+        "file_path": saved_file_path.relative_to(MEDIA_ROOT).as_posix(),
         "metadata": metadata,
     }
 
+
+def extract_audio(url: str) -> dict:
+    """Look up and download in one step (handy for testing from the terminal)."""
+    return download_audio(fetch_info(url))
 
 
 # A tiny CLI so you can test from the terminal.
