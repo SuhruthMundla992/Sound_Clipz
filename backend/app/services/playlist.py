@@ -53,6 +53,13 @@ def update_playlist(session: Session, playlist: Playlist, changes: dict) -> Play
 
 def delete_playlist(session: Session, playlist: Playlist) -> None:
     """Delete a playlist and all its link rows. Clips themselves are untouched."""
+    # The link rows point at the playlist, and the database refuses to delete
+    # a playlist that rows still point to. So delete the links first, and
+    # flush() to send those deletes before the playlist's.
+    links = session.exec(select(PlaylistClip).where(PlaylistClip.playlist_id == playlist.id))
+    for link in links:
+        session.delete(link)
+    session.flush()
     session.delete(playlist)
     session.commit()
 
