@@ -41,6 +41,11 @@ class PlaylistClipAdd(BaseModel):
     clip_id: uuid.UUID
 
 
+# Body for PATCH /clips/{clip_id} — only title is user-editable.
+class ClipUpdate(BaseModel):
+    title: str = Field(default=None, min_length=1)
+
+
 # Valid repeat modes; anything else is a 422.
 RepeatMode = Literal["off", "count", "one"]
 
@@ -118,6 +123,24 @@ def create_clip(request: ClipRequest, response: Response, session: Session = Dep
         )
     response.status_code = 201 if created else 200
     return clip
+
+
+@app.get("/clips/{clip_id}")
+def get_clip(clip_id: uuid.UUID, session: Session = Depends(get_session)):
+    """Return a single clip's metadata."""
+    clip = clip_service.get_clip(session, clip_id)
+    if clip is None:
+        raise HTTPException(status_code=404, detail="Clip not found")
+    return clip
+
+
+@app.patch("/clips/{clip_id}")
+def update_clip(clip_id: uuid.UUID, request: ClipUpdate, session: Session = Depends(get_session)):
+    """Update editable clip fields. Send only the fields to change."""
+    clip = clip_service.get_clip(session, clip_id)
+    if clip is None:
+        raise HTTPException(status_code=404, detail="Clip not found")
+    return clip_service.update_clip(session, clip, request.model_dump(exclude_unset=True))
 
 
 @app.get("/clips/{clip_id}/audio")

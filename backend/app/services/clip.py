@@ -57,6 +57,16 @@ def save_clip(session: Session, video_id: str, file_path: str, metadata: dict) -
     return clip
 
 
+def update_clip(session: Session, clip: Clip, changes: dict) -> Clip:
+    """Apply only the fields in `changes` to a clip and save."""
+    for field, value in changes.items():
+        setattr(clip, field, value)
+    session.add(clip)
+    session.commit()
+    session.refresh(clip)
+    return clip
+
+
 def delete_clip(session: Session, clip: Clip, media_root: Path) -> None:
     """Delete a clip row and its audio file from disk.
 
