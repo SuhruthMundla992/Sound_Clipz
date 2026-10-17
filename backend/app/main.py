@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import uuid
-from contextlib import asynccontextmanager
 from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Response
@@ -10,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from app.config import MEDIA_ROOT
-from app.database import create_db_and_tables, get_session
+from app.database import get_session
 from app.models import PlaylistClip
 from app.pipeline import process_share
 from app.services import clip as clip_service
@@ -18,13 +17,10 @@ from app.services import playlist as playlist_service
 from app.services.audio_extractor import TikTokUnavailable
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    create_db_and_tables()
-    yield
-
-
-app = FastAPI(title="Sound Clipz", lifespan=lifespan)
+# The database tables are created and changed by Alembic migrations, not by the
+# app. Before starting the server, bring the database up to date (from backend/):
+#     .venv/bin/alembic upgrade head
+app = FastAPI(title="Sound Clipz")
 
 
 # ── Request / response body models ────────────────────────────────────────────
@@ -46,7 +42,7 @@ class ClipUpdate(BaseModel):
     title: str = Field(default=None, min_length=1)
 
 
-# Valid repeat modes; anything else is a 422.
+# The only allowed repeat modes. Anything else is rejected with a 422.
 RepeatMode = Literal["off", "count", "one"]
 
 # Valid sort keys and directions for playlist reordering.
@@ -54,7 +50,10 @@ SortBy        = Literal["date_added", "duration", "title"]
 SortDirection = Literal["asc", "desc"]
 
 
-# PATCH /playlists/{id} — send only the fields to change.
+# Body for PATCH /playlists/{playlist_id}. Send only the fields to change,
+# e.g. {"repeat_mode": "count", "repeat_count": 3}. Leaving a field out keeps
+# its current value. The types aren't `| None`, so sending null is a 422
+# (a playlist must always have a name, a mode, etc.).
 class PlaylistUpdate(BaseModel):
     name: str = Field(default=None, min_length=1)
     repeat_mode: RepeatMode = None
@@ -62,7 +61,9 @@ class PlaylistUpdate(BaseModel):
     loop_playlist: bool = None
 
 
-# PATCH /playlists/{id}/clips/{clip_id} — null clears a per-song override.
+# Body for PATCH /playlists/{playlist_id}/clips/{clip_id}: one song's override.
+# Here null IS allowed: {"repeat_mode": null} clears the override so the song
+# goes back to following the playlist's setting.
 class PlaylistClipUpdate(BaseModel):
     repeat_mode: RepeatMode | None = None
     repeat_count: int | None = Field(default=None, ge=1, le=99)
@@ -86,6 +87,7 @@ def _playlist_response(session: Session, playlist) -> dict:
             "position": entry.position,
             "repeat_mode": mode,
             "repeat_count": count,
+            # True when this song has its own setting instead of the playlist's.
             "has_override": entry.repeat_mode is not None or entry.repeat_count is not None,
         })
     return {**playlist.model_dump(), "clips": songs}
@@ -93,6 +95,8 @@ def _playlist_response(session: Session, playlist) -> dict:
 
 # ── Clips ─────────────────────────────────────────────────────────────────────
 
+# @app.get("/health") maps an HTTP GET request for the URL "/health"
+# to the function below. Returning a dict -> FastAPI sends it back as JSON.
 @app.get("/health")
 def health():
     return {"status": "ok"}

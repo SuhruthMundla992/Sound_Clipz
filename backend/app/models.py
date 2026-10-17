@@ -52,7 +52,8 @@ class Playlist(SQLModel, table=True):
     clip_count: int = 0
     total_duration: int = 0  # seconds, sum of every clip's duration
 
-    # Playback settings stored here; the phone's player follows them.
+    # Playback settings. The backend only stores these; the phone's player
+    # follows them when a song ends.
     #   "off"   -> play each song once, then the next
     #   "count" -> play each song repeat_count times, then the next
     #   "one"   -> repeat the current song until it's skipped

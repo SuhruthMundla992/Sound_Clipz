@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 
 from dotenv import load_dotenv
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, create_engine
 
 # Read the .env file so DATABASE_URL (and friends) are available.
 load_dotenv()
@@ -14,13 +14,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 engine = create_engine(DATABASE_URL, echo=True)
 
 
-def create_db_and_tables() -> None:
-    """Create every table defined by our SQLModel classes (if not already there)."""
-    # Importing models registers them with SQLModel.metadata so create_all sees them.
-    from app import models  # noqa: F401
-
-    SQLModel.metadata.create_all(engine)
-    
+# Tables are created and changed by Alembic migrations (backend/alembic/), not here.
 
 
 def get_session():

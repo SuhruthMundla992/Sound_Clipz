@@ -73,6 +73,7 @@ def get_playlist_entries(session: Session, playlist_id: int) -> list[tuple[Clip,
 
 def get_playlist_entry(session: Session, playlist_id: int, clip_id: uuid.UUID) -> PlaylistClip | None:
     """Return the link row for this clip in this playlist, or None if it isn't in it."""
+    # PlaylistClip's primary key is two columns, so get() takes both.
     return session.get(PlaylistClip, {"playlist_id": playlist_id, "clip_id": clip_id})
 
 
@@ -87,7 +88,7 @@ def update_playlist_entry(session: Session, entry: PlaylistClip, changes: dict) 
 
 
 def effective_repeat(playlist: Playlist, entry: PlaylistClip) -> tuple[str, int]:
-    """The repeat settings that actually apply to one song.
+    """The repeat settings that actually apply to one song in a playlist.
 
     Each field uses the song's override if it has one, otherwise the playlist's.
     """
