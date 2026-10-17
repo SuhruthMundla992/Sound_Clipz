@@ -52,6 +52,16 @@ class Playlist(SQLModel, table=True):
     clip_count: int = 0
     total_duration: int = 0  # seconds, sum of every clip's duration
 
+    # Playback settings. The backend only stores these; the phone's player
+    # follows them when a song ends.
+    #   "off"   -> play each song once, then the next
+    #   "count" -> play each song repeat_count times, then the next
+    #   "one"   -> repeat the current song until it's skipped
+    repeat_mode: str = "off"
+    repeat_count: int = 1
+    # After the last song: True = start over from the first, False = stop.
+    loop_playlist: bool = False
+
 
 class PlaylistClip(SQLModel, table=True):
     """Link table: one row per (playlist, clip) pair.
@@ -65,3 +75,8 @@ class PlaylistClip(SQLModel, table=True):
     playlist_id: int = Field(foreign_key="playlist.id", primary_key=True)
     clip_id: uuid.UUID = Field(foreign_key="clip.id", primary_key=True)
     added_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    # Optional per-song override of the playlist's repeat settings.
+    # None means "use the playlist's setting"; each field falls back on its own.
+    repeat_mode: str | None = None
+    repeat_count: int | None = None

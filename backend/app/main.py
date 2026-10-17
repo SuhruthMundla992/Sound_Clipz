@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from contextlib import asynccontextmanager
+from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi.responses import FileResponse
@@ -11,24 +11,17 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session
 
 from app.config import MEDIA_ROOT
-from app.database import create_db_and_tables, get_session
+from app.database import get_session
 from app.pipeline import process_share
 from app.services import clip as clip_service
 from app.services import playlist as playlist_service
 from app.services.audio_extractor import TikTokUnavailable
 
 
-# Runs once when the server starts (before the `yield`) and once when it
-# shuts down (after the `yield`).
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Connect to the database and create any tables that don't exist yet.
-    # Existing tables and their data are left untouched.
-    create_db_and_tables()
-    yield
-
-
-app = FastAPI(title="Sound Clipz", lifespan=lifespan)
+# The database tables are created and changed by Alembic migrations, not by the
+# app. Before starting the server, bring the database up to date (from backend/):
+#     .venv/bin/alembic upgrade head
+app = FastAPI(title="Sound Clipz")
 
 
 # Describes the JSON body POST /clips expects:  {"url": "..."}
@@ -46,6 +39,44 @@ class PlaylistCreate(BaseModel):
 # Body for POST /playlists/{playlist_id}/clips:  {"clip_id": "<uuid>"}
 class PlaylistClipAdd(BaseModel):
     clip_id: uuid.UUID
+
+
+# The only allowed repeat modes. Anything else is rejected with a 422.
+RepeatMode = Literal["off", "count", "one"]
+
+
+# Body for PATCH /playlists/{playlist_id}. Send only the fields to change,
+# e.g. {"repeat_mode": "count", "repeat_count": 3}. Leaving a field out keeps
+# its current value. The types aren't `| None`, so sending null is a 422
+# (a playlist must always have a name, a mode, etc.).
+class PlaylistUpdate(BaseModel):
+    name: str = Field(default=None, min_length=1)
+    repeat_mode: RepeatMode = None
+    repeat_count: int = Field(default=None, ge=1, le=99)
+    loop_playlist: bool = None
+
+
+# Body for PATCH /playlists/{playlist_id}/clips/{clip_id}: one song's override.
+# Here null IS allowed: {"repeat_mode": null} clears the override so the song
+# goes back to following the playlist's setting.
+class PlaylistClipUpdate(BaseModel):
+    repeat_mode: RepeatMode | None = None
+    repeat_count: int | None = Field(default=None, ge=1, le=99)
+
+
+def _playlist_response(session: Session, playlist) -> dict:
+    """A playlist's fields plus its songs, each with the repeat settings that apply to it."""
+    songs = []
+    for clip, entry in playlist_service.get_playlist_entries(session, playlist.id):
+        mode, count = playlist_service.effective_repeat(playlist, entry)
+        songs.append({
+            **clip.model_dump(),
+            "repeat_mode": mode,
+            "repeat_count": count,
+            # True when this song has its own setting instead of the playlist's.
+            "has_override": entry.repeat_mode is not None or entry.repeat_count is not None,
+        })
+    return {**playlist.model_dump(), "clips": songs}
 
 
 # @app.get("/health") maps an HTTP GET request for the URL "/health"
@@ -106,8 +137,7 @@ def get_playlist(playlist_id: int, session: Session = Depends(get_session)):
     playlist = playlist_service.get_playlist(session, playlist_id)
     if playlist is None:
         raise HTTPException(status_code=404, detail="Playlist not found")
-    clips = playlist_service.get_playlist_clips(session, playlist_id)
-    return {**playlist.model_dump(), "clips": clips}
+    return _playlist_response(session, playlist)
 
 
 # POST /playlists/{playlist_id}/clips — add a saved clip to a playlist.
@@ -128,5 +158,38 @@ def add_clip_to_playlist(
 
     # Return the updated playlist (new totals) with its clips, same shape as GET.
     playlist = playlist_service.get_playlist(session, playlist_id)
-    clips = playlist_service.get_playlist_clips(session, playlist_id)
-    return {**playlist.model_dump(), "clips": clips}
+    return _playlist_response(session, playlist)
+
+
+# PATCH /playlists/{playlist_id} — change a playlist's name or playback settings.
+# PATCH = "update part of it": only the fields sent are changed.
+@app.patch("/playlists/{playlist_id}")
+def update_playlist(
+    playlist_id: int, request: PlaylistUpdate, session: Session = Depends(get_session)
+):
+    playlist = playlist_service.get_playlist(session, playlist_id)
+    if playlist is None:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+    # exclude_unset=True keeps only the fields the client actually sent.
+    changes = request.model_dump(exclude_unset=True)
+    playlist = playlist_service.update_playlist(session, playlist, changes)
+    return _playlist_response(session, playlist)
+
+
+# PATCH /playlists/{playlist_id}/clips/{clip_id} — set or clear one song's
+# repeat override inside this playlist.
+@app.patch("/playlists/{playlist_id}/clips/{clip_id}")
+def update_playlist_clip(
+    playlist_id: int,
+    clip_id: uuid.UUID,
+    request: PlaylistClipUpdate,
+    session: Session = Depends(get_session),
+):
+    playlist = playlist_service.get_playlist(session, playlist_id)
+    if playlist is None:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+    entry = playlist_service.get_playlist_entry(session, playlist_id, clip_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Clip is not in this playlist")
+    playlist_service.update_playlist_entry(session, entry, request.model_dump(exclude_unset=True))
+    return _playlist_response(session, playlist)

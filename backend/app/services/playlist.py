@@ -8,6 +8,8 @@ only knows about playlists and the database.
 
 from __future__ import annotations
 
+import uuid
+
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select, update
 
@@ -28,15 +30,54 @@ def get_playlist(session: Session, playlist_id: int) -> Playlist | None:
     return session.get(Playlist, playlist_id)
 
 
-def get_playlist_clips(session: Session, playlist_id: int) -> list[Clip]:
-    """Return the clips in a playlist, in the order they were added."""
+def update_playlist(session: Session, playlist: Playlist, changes: dict) -> Playlist:
+    """Apply only the fields in `changes` (e.g. {"repeat_mode": "one"}) and save."""
+    for field, value in changes.items():
+        setattr(playlist, field, value)
+    session.add(playlist)
+    session.commit()
+    session.refresh(playlist)
+    return playlist
+
+
+def get_playlist_entries(session: Session, playlist_id: int) -> list[tuple[Clip, PlaylistClip]]:
+    """Return (clip, link row) pairs for a playlist, in the order they were added.
+
+    The link row comes along because it holds each song's repeat override.
+    """
     statement = (
-        select(Clip)
+        select(Clip, PlaylistClip)
         .join(PlaylistClip, PlaylistClip.clip_id == Clip.id)
         .where(PlaylistClip.playlist_id == playlist_id)
         .order_by(PlaylistClip.added_at)
     )
     return list(session.exec(statement))
+
+
+def get_playlist_entry(session: Session, playlist_id: int, clip_id: uuid.UUID) -> PlaylistClip | None:
+    """Return the link row for this clip in this playlist, or None if it isn't in it."""
+    # PlaylistClip's primary key is two columns, so get() takes both.
+    return session.get(PlaylistClip, {"playlist_id": playlist_id, "clip_id": clip_id})
+
+
+def update_playlist_entry(session: Session, entry: PlaylistClip, changes: dict) -> PlaylistClip:
+    """Set or clear one song's repeat override. A value of None clears that field."""
+    for field, value in changes.items():
+        setattr(entry, field, value)
+    session.add(entry)
+    session.commit()
+    session.refresh(entry)
+    return entry
+
+
+def effective_repeat(playlist: Playlist, entry: PlaylistClip) -> tuple[str, int]:
+    """The repeat settings that actually apply to one song in a playlist.
+
+    Each field uses the song's override if it has one, otherwise the playlist's.
+    """
+    mode = entry.repeat_mode if entry.repeat_mode is not None else playlist.repeat_mode
+    count = entry.repeat_count if entry.repeat_count is not None else playlist.repeat_count
+    return mode, count
 
 
 def add_clip_to_playlist(session: Session, playlist_id: int, clip: Clip) -> bool:

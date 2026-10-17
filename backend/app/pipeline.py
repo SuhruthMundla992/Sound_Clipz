@@ -43,13 +43,13 @@ def process_share(session: Session, raw_url: str) -> tuple[Clip, bool]:
 if __name__ == "__main__":
     import sys
 
-    from app.database import create_db_and_tables, engine
+    from app.database import engine
 
     if len(sys.argv) != 2:
         print("Usage: python -m app.pipeline <tiktok_url>")
         raise SystemExit(1)
 
-    create_db_and_tables()
+    # The tables must already exist: run `alembic upgrade head` first.
     with Session(engine) as session:
         clip, created = process_share(session, sys.argv[1])
         print("new clip saved" if created else "already saved", clip)
