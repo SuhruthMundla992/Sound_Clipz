@@ -1,53 +1,78 @@
-"""
-audio_extractor.py — take a clean TikTok URL, extract the audio, save it.
-
-YOU are writing this one. The gameplan is laid out as TODO steps below.
-Fill in the code under each step. Run it often — don't write all of it at once.
-
-A reference version lives in reference/audio_extractor_reference.py — only
-peek if you're truly stuck.
-"""
-
 from __future__ import annotations
+
 import yt_dlp
-import pathlib
-import os
+
+from app.config import BACKEND_ROOT, MEDIA_ROOT
+
+OUTPUT_DIR = MEDIA_ROOT / "original"   # where saved audio goes
+BIN_DIR = BACKEND_ROOT / "bin"         # where ffmpeg + ffprobe live
 
 
-# --- Locations ---
-# TODO Step 1: define where files go.
-#   - the folder for saved audio (media/original)
-#   - the folder where ffmpeg + ffprobe live (backend/bin)
-#   Tip: anchor them to the backend root so this works from any directory.
+class TikTokUnavailable(Exception):
+    """yt-dlp couldn't get this TikTok: deleted, private, region-locked, or blocked."""
 
 
-def extract_audio(url: str):
+def _ydl_options() -> dict:
+    """yt-dlp settings, built fresh each time so no two downloads share one dict."""
+    return {
+        # grab the best audio-only stream (fall back to best overall)
+        "format": "bestaudio/best",
+        "outtmpl": str(OUTPUT_DIR / "%(id)s.%(ext)s"),
+        "ffmpeg_location": str(BIN_DIR),
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+    }
+
+
+def fetch_info(url: str) -> dict:
+    """Look up a TikTok's metadata, including its video id, WITHOUT downloading.
+
+    This lets the caller check the database for the video id first and skip
+    the download entirely if the clip is already saved.
     """
-    Download audio from a (clean) TikTok URL and save it as .m4a.
-    Return the saved file path + metadata (you decide the shape).
+    try:
+        with yt_dlp.YoutubeDL(_ydl_options()) as ydl:
+            return ydl.extract_info(url, download=False)
+    except yt_dlp.utils.DownloadError as e:
+        raise TikTokUnavailable(str(e)) from e
+
+
+def download_audio(info: dict) -> dict:
+    """Download the audio described by `info` (the result of fetch_info).
+
+    Reuses the info yt-dlp already fetched, so TikTok isn't looked up twice.
     """
-    # TODO Step 1 (cont.): make sure the output folder exists.
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)   # create the folder if it's missing
 
-    # TODO Step 2: build the yt-dlp options dict.
-    #   - format: best audio
-    #   - outtmpl: name the file (hint: by the video's id)
-    #   - ffmpeg_location: point at your backend/bin
-    #   - postprocessors: FFmpegExtractAudio -> m4a
-    #   - (optional) quiet / no_warnings / noprogress
+    try:
+        with yt_dlp.YoutubeDL(_ydl_options()) as ydl:
+            info = ydl.process_ie_result(info, download=True)
+    except yt_dlp.utils.DownloadError as e:
+        raise TikTokUnavailable(str(e)) from e
 
-    # TODO Step 3: run the download.
-    #   - open a YoutubeDL context with your options
-    #   - call extract_info(url, download=True) and keep the returned info dict
-    #   - TIP for your FIRST run: just `print(info)` here and stop, to SEE what
-    #     yt-dlp gives you. Then continue with steps 4-6.
+    saved_file_path = OUTPUT_DIR / f"{info['id']}.{info['ext']}"
 
-    # TODO Step 4: figure out the saved file path (from the id + .m4a).
+    metadata = {
+        "title": info.get("title", "Unknown Title"),
+        "uploader": info.get("uploader", "Unknown Uploader"),
+        "duration": info.get("duration", 0),
+        "thumbnail": info.get("thumbnail", ""),
+    }
 
-    # TODO Step 5: pull the metadata you want out of info
-    #   (title, uploader, duration, thumbnail) — use .get() with fallbacks.
+    # Return the path RELATIVE to MEDIA_ROOT ("original/<id>.mp3"), not the
+    # full path on this machine, so it stays valid if the backend moves.
+    # as_posix() uses forward slashes on every OS.
+    return {
+        "video_id": info["id"],
+        "file_path": saved_file_path.relative_to(MEDIA_ROOT).as_posix(),
+        "metadata": metadata,
+    }
 
-    # TODO Step 6: return it (dict? dataclass? your call).
-    raise NotImplementedError  # remove this once you return something
+
+def extract_audio(url: str) -> dict:
+    """Look up and download in one step (handy for testing from the terminal)."""
+    return download_audio(fetch_info(url))
 
 
 # A tiny CLI so you can test from the terminal.
